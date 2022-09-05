@@ -63,7 +63,7 @@ def set_logconf(loglevel=None, islogtofile=None):
     log_file_name = islogtofile  # in ase its False
     if islogtofile:
         date_now = datetime.datetime.now()
-        log_file_name = '%s.log' % (date_now.strftime('%Y%m%d_%H%M_'))
+        log_file_name = '%s.log' % (date_now.strftime('%Y%m%d_%H%M_pgsearchcorrupt'))
 
     logging.basicConfig(
         filename=log_file_name,
@@ -113,6 +113,7 @@ def get_table_statistics(schema, table, conn):
     try:
         cur.execute(query)
         res = cur.fetchall()
+
     except psycopg2.errors.UndefinedTable:
         logging.error('relation (tabela) inexistente %(schema)s.%(table)s' % (
             {'schema': schema, 'table': table}))
@@ -125,7 +126,7 @@ def get_table_statistics(schema, table, conn):
         cur.close()
 
     if res:
-        return res[0]
+        return res
     else:
         return (0, 0)
 
@@ -183,19 +184,22 @@ def get_records_per_worker(cpus=2, blocks=100):
     """
     start = 0
     stop = blocks
-    step = blocks / (cpus**2)
+
+    step = blocks // (cpus**2)
+
     if step < 1:
         step = 1
 
-    pages_small_ranges = [(n, min(n + step, stop)) for n in xrange(start, stop, step)]
+    pages_small_ranges = [(n, min(n + step, stop)) for n in range(start, stop, step)]
 
-    step = len(pages_small_ranges) / cpus  # num of ranges per cpu
+    step = len(pages_small_ranges) // cpus  # num of ranges per cpu
     if step < 1:
         step = 1
     start = 0
     stop = len(pages_small_ranges)
     # agrupar os ranges para 4 processadores
-    ranges_indexes = [(n, min(n + step, stop)) for n in xrange(start, stop, step)]
+
+    ranges_indexes = [(n, min(n + step, stop)) for n in range(start, stop, step)]
 
     borrow = None
     if len(ranges_indexes) > cpus:
@@ -222,7 +226,7 @@ def get_ctid_query(table='', block=0, record=1):
 
 
 def get_insert_query(table, rec_id):
-    query = 'INSERT INTO submissao_spresgeom_copy SELECT * FROM %s WHERE id = %s;' % (table, rec_id)
+    query = 'INSERT INTO newtable_safedata SELECT * FROM %s WHERE id = %s;' % (table, rec_id)  # todo: parameter relation name
     return query
 
 
@@ -261,12 +265,14 @@ def check_records(conn, table, block, records):
             # raise e  # todo: not raise , log it !!
             try:
                 # esta query
-                qresult = run_query(conn, 'SELECT ctid, id FROM %(table)s WHERE CTID=\'%(ctid_tuple)s\'' % (
+                query = 'SELECT ctid, id FROM %(table)s WHERE CTID=\'%(ctid_tuple)s\'' % (
                     {'table': table, 'ctid_tuple': '(%s, %s)' % (block, record_index)})
-                )
-                logging.error('%(process_name)s| CORRUPTED Bl:%(block)s Re:%(record)s ID:%(record_id)s ErrorMessage %(erros_msg)s ' % (
-                    {'process_name': process_name, 'block': block, 'record': record_index, 'record_id': qresult[0][1], 'erros_msg': e})
-                )
+                qresult = run_query(conn, query)
+                # logging.debug(f'Query: {query}')
+                # logging.error(f' ERROR Query: {query}')
+                # logging.warning('%(process_name)s|  Bl:%(block)s Re:%(record)s ID:%(record_id)s ErrorMessage:%(erros_msg)s ' % (
+                #     {'process_name': process_name, 'block': block, 'record': record_index, 'record_id': qresult[0][1], 'erros_msg': e})
+                # )
             except Exception as e:
                 conn.rollback()
                 logging.error('%(process_name)s| CORRUPTED Fail get ID Bl:%(block)s Re:%(record)s ErrorMessage %(erros_msg)s' % (
@@ -281,18 +287,18 @@ def check_records(conn, table, block, records):
             try:
                 i_id = qresult[0][1]  # id
             except Exception as e:
-                logging.error('%s| Erro no id %s' % (process_name, qresult))  # loga resul TOTO: Precisa melhorar isso aqui
+                logging.error('%s| Erro no id %s' % (process_name, qresult))  # loga resul #todo: Precisa melhorar isso aqui
                 i_id = None
 
-            if i_id:
-                try:
-                    run_atomic_query(conn, get_insert_query(table, i_id))  # INSERT INTO
-                    inserts += 1
-                except Exception as e:
-                    inserts -= 1
-                    conn.rollback()
-                    logging.error('%s| INSERT FAIL Bl:%s Re:%s id:%s ErrorMessage :%s' % (process_name, block, record_index, i_id, e))
-                    # raise e  # todo: not raise , log it !!
+            # if i_id:
+            #     try:
+            #         run_atomic_query(conn, get_insert_query(table, i_id))  # INSERT INTO
+            #         inserts += 1
+            #     except Exception as e:
+            #         inserts -= 1
+            #         conn.rollback()
+            #         logging.error('%s| INSERT FAIL Bl:%s Re:%s id:%s ErrorMessage :%s' % (process_name, block, record_index, i_id, e))
+            #         # raise e  # todo: not raise , log it !!
 
     # 7353533 20201104 09:20:05|root|ERROR|CORRUPTED Bl:12070712 Re:36 D: True  ErrorMessage missing chunk number 8 for to        ast value 51071556 in pg_toast_24735
     # 7353534
@@ -355,29 +361,29 @@ if __name__ == "__main__":
     conn.close()
 
     # print log file name
-    sys.stdout.write('schema ................. : %s\n' % args.schema)
-    sys.stdout.write('database ............... : %s\n' % args.database)
-    sys.stdout.write('table .................. : %s\n' % args.table)
-    sys.stdout.write('Blocks/Pages ........... : %s\n' % table_stats[0])
-    sys.stdout.write('Postgre Estimate Records : %s\n' % table_stats[1])
-    sys.stdout.write('Estimate Records/Pages   : %s\n' % (table_stats[1] / table_stats[0]))
+    sys.stdout.write('schema..................: %s\n' % args.schema)
+    sys.stdout.write('database................: %s\n' % args.database)
+    sys.stdout.write('table...................: %s\n' % args.table)
 
-    logging.info('INICIO : %s' % (datetime.datetime.now().strftime('%Y%m%d %H:%M')))
-    logging.info('schema ................. : %s' % args.schema)
-    logging.info('database ............... : %s' % args.database)
-    logging.info('table .................. : %s' % args.table)
-    logging.info('Blocks/Pages ........... : %s' % table_stats[0])
-    logging.info('Postgre Estimate Records : %s' % table_stats[1])
-    logging.info('Estimate Records/Pages   : %s' % (table_stats[1] / table_stats[0]))
+    sys.stdout.write(f'Blocks/Pages ...........: {table_stats[0][0]}\n' )
+    sys.stdout.write('Postgre Estimate Records: %s\n' % table_stats[0][1])
+    sys.stdout.write('Estimate Records/Pages..: %s\n' % (table_stats[0][1] / table_stats[0][0]))
+
+    logging.info('INICIO ..................: %s' % (datetime.datetime.now().strftime('%Y%m%d %H:%M')))
+    logging.info('schema: %s' % args.schema)
+    logging.info('database: %s' % args.database)
+    logging.info('table: %s' % args.table)
+    logging.info('Blocks/Pages: %s' % table_stats[0][0])
+    logging.info('Postgre Estimate Records: %s' % table_stats[0][1])
+    logging.info('Estimate Records/Pages: %s' % (table_stats[0][1] / table_stats[0][0]))
 
     # if blocks not informed it is taken from pg_class
     if not args.blocks:
-        args.blocks = table_stats[0]
+        args.blocks = table_stats[0][0]
 
     ranges_list_per_cpu = get_records_per_worker(cpus=args.cpus, blocks=args.blocks)
 
-    logging.info('RANGES ')
-    logging.info(ranges_list_per_cpu)
+    logging.info(f'ranges: {ranges_list_per_cpu}')
 
     for proc_num, proc_range in enumerate(ranges_list_per_cpu):
 
@@ -389,6 +395,6 @@ if __name__ == "__main__":
         service.start()
 
     # at the end
-    log_file_name = 'log File ............... : %s' % (log_file_name)
+    log_file_name = 'log File ............... : %s \n' % (log_file_name)
     sys.stdout.write(log_file_name)
     sys.stdout.flush()
